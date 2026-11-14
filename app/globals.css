@@ -1,0 +1,379 @@
+@import "tailwindcss";
+
+/* Phones held sideways: too short to stack the question above the keypad. */
+@custom-variant short (@media (orientation: landscape) and (max-height: 540px));
+/* Tablets and desktops: tall enough to centre the question and keypad together. */
+@custom-variant roomy (@media (min-height: 800px));
+
+@theme inline {
+  --font-sans:
+    var(--font-fredoka), ui-rounded, "SF Pro Rounded", "Arial Rounded MT Bold",
+    system-ui, sans-serif;
+}
+
+@theme {
+  --color-ink: #1e1b4b;
+  --color-gold: #fbbf24;
+
+  --animate-pop: pop 0.4s cubic-bezier(0.3, 1.5, 0.5, 1) both;
+  --animate-shake: shake 0.45s ease-in-out both;
+  /* Quick, so a new question is readable straight away in timed rounds. */
+  --animate-rise: rise 0.22s ease-out both;
+  --animate-star-in: star-in 0.9s cubic-bezier(0.3, 1.5, 0.5, 1) 0.35s both;
+  --animate-bob: bob 1.6s ease-in-out infinite;
+  --animate-glow: glow 1.8s ease-in-out infinite;
+  --animate-blink: blink 1s steps(1) infinite;
+
+  @keyframes pop {
+    from {
+      transform: scale(0.5);
+      opacity: 0;
+    }
+    to {
+      transform: scale(1);
+      opacity: 1;
+    }
+  }
+  @keyframes shake {
+    0%,
+    100% {
+      transform: translateX(0);
+    }
+    20% {
+      transform: translateX(-8px);
+    }
+    40% {
+      transform: translateX(8px);
+    }
+    60% {
+      transform: translateX(-5px);
+    }
+    80% {
+      transform: translateX(5px);
+    }
+  }
+  @keyframes rise {
+    from {
+      transform: translateY(12px);
+      opacity: 0;
+    }
+    to {
+      transform: none;
+      opacity: 1;
+    }
+  }
+  @keyframes star-in {
+    0% {
+      transform: scale(0) rotate(-180deg);
+      opacity: 0;
+    }
+    70% {
+      transform: scale(1.35) rotate(12deg);
+      opacity: 1;
+    }
+    100% {
+      transform: scale(1) rotate(0);
+      opacity: 1;
+    }
+  }
+  @keyframes bob {
+    0%,
+    100% {
+      transform: translateY(0);
+    }
+    50% {
+      transform: translateY(-8px);
+    }
+  }
+  @keyframes glow {
+    0%,
+    100% {
+      box-shadow:
+        0 5px 0 var(--edge),
+        0 0 0 0 rgb(251 191 36 / 0.6);
+    }
+    50% {
+      box-shadow:
+        0 5px 0 var(--edge),
+        0 0 0 14px rgb(251 191 36 / 0);
+    }
+  }
+  @keyframes blink {
+    0%,
+    50% {
+      opacity: 1;
+    }
+    50.01%,
+    100% {
+      opacity: 0;
+    }
+  }
+}
+
+@layer base {
+  html {
+    background: #1b1748;
+    color-scheme: dark;
+  }
+
+  body {
+    color: #fff;
+    -webkit-tap-highlight-color: transparent;
+    overscroll-behavior-y: none;
+  }
+
+  /* Night sky: a gradient with a few layers of tiny repeating stars. */
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    background-image:
+      radial-gradient(circle at 24px 36px, #fff 1px, transparent 1.6px),
+      radial-gradient(circle at 130px 90px, rgb(255 255 255 / 0.7) 1px, transparent 1.6px),
+      radial-gradient(circle at 200px 180px, rgb(255 255 255 / 0.5) 1.3px, transparent 2px),
+      radial-gradient(circle at 70px 250px, rgb(255 255 255 / 0.4) 1px, transparent 1.6px),
+      linear-gradient(165deg, #1b1748 0%, #2d2a7a 50%, #5b2a8c 100%);
+    background-size:
+      230px 230px,
+      270px 270px,
+      310px 310px,
+      350px 350px,
+      100% 100%;
+  }
+
+  /* No double-tap zoom when a child taps quickly. */
+  a,
+  button {
+    touch-action: manipulation;
+  }
+
+  button {
+    cursor: pointer;
+  }
+
+  :focus-visible {
+    outline: 3px solid #fde68a;
+    outline-offset: 3px;
+  }
+}
+
+@layer components {
+  /* Page frame that keeps clear of notches and home indicators. */
+  .screen {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    max-width: 48rem;
+    min-height: 100dvh;
+    margin-inline: auto;
+    padding: max(1rem, env(safe-area-inset-top))
+      max(1rem, env(safe-area-inset-right))
+      max(1.5rem, env(safe-area-inset-bottom))
+      max(1rem, env(safe-area-inset-left));
+  }
+
+  /* Chunky button with an edge that squashes when pressed. */
+  .btn {
+    --bg: #fff;
+    --edge: #c7d2fe;
+    --fg: var(--color-ink);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    margin-bottom: 5px;
+    padding: 0.8rem 1.25rem;
+    border-radius: 1rem;
+    background: var(--bg);
+    color: var(--fg);
+    font-size: 1.125rem;
+    font-weight: 600;
+    line-height: 1.2;
+    text-align: center;
+    box-shadow: 0 5px 0 var(--edge);
+    user-select: none;
+    transition:
+      transform 0.06s ease,
+      box-shadow 0.06s ease,
+      filter 0.15s ease,
+      opacity 0.15s ease;
+  }
+  .btn:active {
+    transform: translateY(4px);
+    box-shadow: 0 1px 0 var(--edge);
+  }
+  .btn:disabled {
+    opacity: 0.45;
+    pointer-events: none;
+  }
+  @media (hover: hover) {
+    .btn:hover {
+      filter: brightness(1.07);
+    }
+  }
+
+  .btn-gold {
+    --bg: #fbbf24;
+    --edge: #d97706;
+    --fg: #422006;
+  }
+  .btn-green {
+    --bg: #4ade80;
+    --edge: #16a34a;
+    --fg: #052e16;
+  }
+  .btn-red {
+    --bg: #fb7185;
+    --edge: #e11d48;
+    --fg: #4c0519;
+  }
+  .btn-ghost {
+    --bg: rgb(255 255 255 / 0.14);
+    --edge: rgb(0 0 0 / 0.28);
+    --fg: #fff;
+  }
+  /* Candy colours: set --h (hue) on the element. Dark text reads on all of them. */
+  .btn-hue,
+  .tile {
+    --bg: oklch(0.85 0.115 var(--h));
+    --edge: oklch(0.66 0.13 var(--h));
+    --fg: var(--color-ink);
+  }
+
+  .btn-lg {
+    padding: 1rem 1.75rem;
+    border-radius: 1.25rem;
+    font-size: 1.375rem;
+  }
+  .btn-sm {
+    padding: 0.5rem 0.9rem;
+    border-radius: 0.8rem;
+    font-size: 1rem;
+  }
+  .btn-icon {
+    width: 2.75rem;
+    height: 2.75rem;
+    padding: 0;
+    flex: none;
+    font-size: 1.25rem;
+  }
+
+  /* Frosted panel on the night sky. */
+  .card {
+    border: 1px solid rgb(255 255 255 / 0.16);
+    border-radius: 1.5rem;
+    background: rgb(255 255 255 / 0.1);
+  }
+
+  .pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    padding: 0.2rem 0.6rem;
+    border-radius: 999px;
+    background: rgb(30 27 75 / 0.85);
+    color: #fde68a;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .star-on {
+    fill: #fbbf24;
+    stroke: #d97706;
+  }
+  .star-off {
+    fill: rgb(148 163 184 / 0.22);
+    stroke: rgb(148 163 184 / 0.6);
+  }
+
+  /* One times table on the home grid. */
+  .tile {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.4rem;
+    aspect-ratio: 1;
+    margin-bottom: 6px;
+    border-radius: 1.4rem;
+    background: var(--bg);
+    color: var(--fg);
+    box-shadow: 0 6px 0 var(--edge);
+    user-select: none;
+    transition:
+      transform 0.08s ease,
+      box-shadow 0.08s ease,
+      filter 0.15s ease;
+  }
+  .tile:active {
+    transform: translateY(5px);
+    box-shadow: 0 1px 0 var(--edge);
+  }
+  @media (hover: hover) {
+    .tile:hover:not(:active) {
+      transform: translateY(-3px);
+      box-shadow: 0 9px 0 var(--edge);
+      filter: brightness(1.05);
+    }
+  }
+
+  /* Number pad and answer buttons. */
+  .key {
+    height: clamp(2.9rem, 8.5dvh, 5rem);
+    margin-bottom: 5px;
+    padding: 0;
+    font-size: clamp(1.5rem, 4.5dvh, 2.25rem);
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+  }
+  .choice {
+    height: clamp(4rem, 13dvh, 6.5rem);
+    padding: 0;
+    border-radius: 1.4rem;
+    font-size: clamp(1.9rem, 6dvh, 2.75rem);
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+  }
+  .choice.is-answer {
+    --bg: #4ade80;
+    --edge: #16a34a;
+  }
+  .choice.is-wrong {
+    --bg: #fb7185;
+    --edge: #e11d48;
+  }
+  .choice.is-dim {
+    opacity: 0.35;
+  }
+
+  /* Round progress: one dot per fact. */
+  .dot {
+    flex: 1;
+    max-width: 1.5rem;
+    height: 0.6rem;
+    border-radius: 999px;
+    background: rgb(255 255 255 / 0.18);
+    transition: background-color 0.2s ease;
+  }
+  .dot-right {
+    background: #4ade80;
+  }
+  .dot-fixed {
+    background: #fbbf24;
+  }
+  .dot-missed {
+    background: #fb7185;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
