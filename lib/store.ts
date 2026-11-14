@@ -1,11 +1,30 @@
-import { useSyncExternalStore } from "react";
-import { STARS_PER_TABLE, TABLES, TOTAL_STARS, type LevelId } from "./game";
+import { useEffect, useSyncExternalStore } from "react";
+import {
+  ALL_STARS,
+  STARS_PER_TABLE,
+  SUBJECTS,
+  isOp,
+  starsIn,
+  subject,
+  type LevelId,
+  type Op,
+} from "./game";
 
 /**
  * Everything the app remembers lives in one localStorage entry on this device.
  * Nothing is sent anywhere.
+ *
+ * The key has stayed the same since the first version so that progress saved
+ * before addition and subtraction existed is picked up, not orphaned.
  */
 const STORAGE_KEY = "star-tables:v1";
+
+/**
+ * Saved stars are kept for every table number up to this, whatever a subject
+ * currently goes up to. Shortening a subject then hides its extra tables
+ * without throwing away what was earned on them.
+ */
+const HIGHEST_TABLE_EVER = 12;
 
 export interface LevelBest {
   /** Most right-first-try answers in one round. */
@@ -20,16 +39,21 @@ export interface TableProgress {
   best: Partial<Record<LevelId, LevelBest>>;
 }
 
+/** Progress on the tables of one subject, by table number. */
+export type Tables = Record<number, TableProgress>;
+
 export interface Profile {
   id: string;
   name: string;
   avatar: string;
   createdAt: number;
-  tables: Record<number, TableProgress>;
+  /** The subject showing on this player's home screen. */
+  subject: Op;
+  progress: Record<Op, Tables>;
 }
 
 export interface AppData {
-  version: 1;
+  version: 2;
   profiles: Profile[];
   activeId: string | null;
   sound: boolean;
@@ -40,14 +64,31 @@ export interface RoundReward {
   newStar: boolean;
   /** Stars on this table after the round. */
   stars: number;
-  /** This round earned the very last star. */
+  /** This round earned the last star of its subject. */
+  subjectMastered: boolean;
+  /** This round earned the last star of the last subject. */
   allMastered: boolean;
 }
 
-const EMPTY: AppData = { version: 1, profiles: [], activeId: null, sound: true };
+const EMPTY: AppData = { version: 2, profiles: [], activeId: null, sound: true };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
+}
+
+function sanitizeTables(raw: unknown): Tables {
+  const tables: Tables = {};
+  if (!isRecord(raw)) return tables;
+  for (let table = 1; table <= HIGHEST_TABLE_EVER; table++) {
+    const t = raw[table];
+    if (!isRecord(t)) continue;
+    const stars = Math.round(Number(t.stars));
+    tables[table] = {
+      stars: Math.min(STARS_PER_TABLE, Math.max(0, stars || 0)),
+      best: isRecord(t.best) ? (t.best as TableProgress["best"]) : {},
+    };
+  }
+  return tables;
 }
 
 /** Never trust what comes out of storage: keep what's valid, drop the rest. */
@@ -59,31 +100,28 @@ function sanitize(raw: unknown): AppData {
     if (!isRecord(p) || typeof p.id !== "string" || typeof p.name !== "string") {
       continue;
     }
-    const tables: Record<number, TableProgress> = {};
-    if (isRecord(p.tables)) {
-      for (const table of TABLES) {
-        const t = p.tables[table];
-        if (!isRecord(t)) continue;
-        const stars = Math.round(Number(t.stars));
-        tables[table] = {
-          stars: Math.min(STARS_PER_TABLE, Math.max(0, stars || 0)),
-          best: isRecord(t.best) ? (t.best as TableProgress["best"]) : {},
-        };
-      }
-    }
+    // Version 1 only had multiplication, saved as `tables`. Carry it over,
+    // and keep those players on the subject they were already working on.
+    const fromV1 = !isRecord(p.progress);
+    const saved = isRecord(p.progress) ? p.progress : { multiply: p.tables };
     profiles.push({
       id: p.id,
       name: p.name,
       avatar: typeof p.avatar === "string" ? p.avatar : "⭐",
       createdAt: typeof p.createdAt === "number" ? p.createdAt : 0,
-      tables,
+      subject: isOp(p.subject) ? p.subject : fromV1 ? "multiply" : "add",
+      progress: {
+        add: sanitizeTables(saved.add),
+        subtract: sanitizeTables(saved.subtract),
+        multiply: sanitizeTables(saved.multiply),
+      },
     });
   }
 
   const activeId = profiles.some((p) => p.id === raw.activeId)
     ? (raw.activeId as string)
     : null;
-  return { version: 1, profiles, activeId, sound: raw.sound !== false };
+  return { version: 2, profiles, activeId, sound: raw.sound !== false };
 }
 
 function load(): AppData {
@@ -115,6 +153,19 @@ function update(change: (data: AppData) => AppData): void {
   listeners.forEach((listener) => listener());
 }
 
+function updateProfile(id: string, change: (profile: Profile) => Profile): void {
+  update((data) => {
+    const profile = data.profiles.find((p) => p.id === id);
+    if (!profile) return data;
+    const changed = change(profile);
+    if (changed === profile) return data;
+    return {
+      ...data,
+      profiles: data.profiles.map((p) => (p.id === id ? changed : p)),
+    };
+  });
+}
+
 function subscribe(listener: () => void): () => void {
   listeners.add(listener);
   // Pick up changes made in another tab.
@@ -141,26 +192,48 @@ export function useAppData(): AppData | null {
   );
 }
 
+/**
+ * Keeps the home screen on the subject being played, however the page was
+ * reached, so that "All tables" always leads back to the right grid.
+ */
+export function useSubjectSync(profile: Profile | null, op: Op): void {
+  const id = profile?.id;
+  const current = profile?.subject;
+  useEffect(() => {
+    if (id && current !== op) setSubject(id, op);
+  }, [id, current, op]);
+}
+
 // ── Reading ────────────────────────────────────────────────────────────────
 
 export function activeProfile(data: AppData): Profile | null {
   return data.profiles.find((p) => p.id === data.activeId) ?? null;
 }
 
-export function starsFor(profile: Profile, table: number): number {
-  return profile.tables[table]?.stars ?? 0;
+export function starsFor(profile: Profile, op: Op, table: number): number {
+  return profile.progress[op][table]?.stars ?? 0;
 }
 
-export function totalStars(profile: Profile): number {
-  return TABLES.reduce((sum, table) => sum + starsFor(profile, table), 0);
+/** Stars earned on the tables one subject has now. */
+export function subjectStars(profile: Profile, op: Op): number {
+  return subject(op).tables.reduce(
+    (sum, table) => sum + starsFor(profile, op, table),
+    0,
+  );
+}
+
+/** Stars earned across every subject. */
+export function allStars(profile: Profile): number {
+  return SUBJECTS.reduce((sum, s) => sum + subjectStars(profile, s.id), 0);
 }
 
 /** The next star to go for: the first unfinished table, at its next level. */
 export function nextGoal(
   profile: Profile,
+  op: Op,
 ): { table: number; levelId: LevelId } | null {
-  for (const table of TABLES) {
-    const stars = starsFor(profile, table);
+  for (const table of subject(op).tables) {
+    const stars = starsFor(profile, op, table);
     if (stars < STARS_PER_TABLE) return { table, levelId: (stars + 1) as LevelId };
   }
   return null;
@@ -171,7 +244,14 @@ export function nextGoal(
 export function addProfile(name: string, avatar: string): void {
   // Not crypto.randomUUID(): that's missing on plain-http LAN addresses.
   const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
-  const profile: Profile = { id, name, avatar, createdAt: Date.now(), tables: {} };
+  const profile: Profile = {
+    id,
+    name,
+    avatar,
+    createdAt: Date.now(),
+    subject: "add",
+    progress: { add: {}, subtract: {}, multiply: {} },
+  };
   update((data) => ({
     ...data,
     profiles: [...data.profiles, profile],
@@ -195,19 +275,29 @@ export function setSound(sound: boolean): void {
   update((data) => ({ ...data, sound }));
 }
 
+/** Remembers which subject this player's home screen should open on. */
+export function setSubject(profileId: string, op: Op): void {
+  updateProfile(profileId, (profile) =>
+    profile.subject === op ? profile : { ...profile, subject: op },
+  );
+}
+
 export function recordRound(
   profileId: string,
+  op: Op,
   table: number,
   levelId: LevelId,
   result: { passed: boolean; firstTry: number; timeMs: number | null },
 ): RoundReward {
-  const reward: RoundReward = { newStar: false, stars: 0, allMastered: false };
+  const reward: RoundReward = {
+    newStar: false,
+    stars: 0,
+    subjectMastered: false,
+    allMastered: false,
+  };
 
-  update((data) => {
-    const profile = data.profiles.find((p) => p.id === profileId);
-    if (!profile) return data;
-
-    const before = profile.tables[table] ?? { stars: 0, best: {} };
+  updateProfile(profileId, (profile) => {
+    const before = profile.progress[op][table] ?? { stars: 0, best: {} };
     const stars = result.passed ? Math.max(before.stars, levelId) : before.stars;
     const oldBest = before.best[levelId];
     const best: LevelBest = {
@@ -220,21 +310,21 @@ export function recordRound(
 
     const updated: Profile = {
       ...profile,
-      tables: {
-        ...profile.tables,
-        [table]: { stars, best: { ...before.best, [levelId]: best } },
+      progress: {
+        ...profile.progress,
+        [op]: {
+          ...profile.progress[op],
+          [table]: { stars, best: { ...before.best, [levelId]: best } },
+        },
       },
     };
 
     reward.stars = stars;
     reward.newStar = stars > before.stars;
-    reward.allMastered =
-      reward.newStar && totalStars(updated) === TOTAL_STARS;
-
-    return {
-      ...data,
-      profiles: data.profiles.map((p) => (p.id === profileId ? updated : p)),
-    };
+    reward.subjectMastered =
+      reward.newStar && subjectStars(updated, op) === starsIn(op);
+    reward.allMastered = reward.newStar && allStars(updated) === ALL_STARS;
+    return updated;
   });
 
   return reward;

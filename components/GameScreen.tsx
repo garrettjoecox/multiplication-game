@@ -11,11 +11,14 @@ import {
 } from "react";
 import { celebrate, fireworks, sparkle } from "@/lib/confetti";
 import {
-  FACTS,
   LEVELS,
   STARS_PER_TABLE,
+  fact,
+  subject,
+  tableName,
   type Level,
   type LevelId,
+  type Op,
   type Question,
 } from "@/lib/game";
 import {
@@ -32,6 +35,7 @@ import {
   recordRound,
   starsFor,
   useAppData,
+  useSubjectSync,
   type RoundReward,
 } from "@/lib/store";
 import { Screen, Splash, Star, hue } from "./ui";
@@ -44,9 +48,11 @@ const PRAISE = ["Yes!", "Nice!", "Awesome!", "Great!", "Super!", "Boom!", "Wow!"
 const CHOICE_HUES = [230, 335, 85, 165];
 
 export function GameScreen({
+  op,
   table,
   levelId,
 }: {
+  op: Op;
   table: number;
   levelId: LevelId;
 }) {
@@ -55,21 +61,24 @@ export function GameScreen({
   const profile = data ? activeProfile(data) : null;
   const level = LEVELS[levelId - 1];
   // A level opens once the star before it has been earned.
-  const allowed = profile !== null && starsFor(profile, table) >= levelId - 1;
+  const allowed =
+    profile !== null && starsFor(profile, op, table) >= levelId - 1;
   const sendTo =
-    data === null || allowed ? null : profile ? `/table/${table}/` : "/";
+    data === null || allowed ? null : profile ? `/play/${op}/${table}/` : "/";
 
   useEffect(() => {
     if (sendTo) router.replace(sendTo);
   }, [sendTo, router]);
+  useSubjectSync(profile, op);
 
   if (!profile || !allowed) return <Splash />;
 
   // Keyed so that moving straight from one level to the next starts fresh.
   return (
     <Game
-      key={`${table}:${level.id}`}
+      key={`${op}:${table}:${level.id}`}
       profileId={profile.id}
+      op={op}
       table={table}
       level={level}
     />
@@ -78,6 +87,7 @@ export function GameScreen({
 
 interface GameProps {
   profileId: string;
+  op: Op;
   table: number;
   level: Level;
 }
@@ -96,11 +106,12 @@ interface Finished {
 
 function Round({
   profileId,
+  op,
   table,
   level,
   onReplay,
 }: GameProps & { onReplay: () => void }) {
-  const [state, setState] = useState(() => newRound(table, level));
+  const [state, setState] = useState(() => newRound(op, table, level));
   const [finished, setFinished] = useState<Finished | null>(null);
   // Always the newest state, so two quick key presses can't act on a stale one.
   const latest = useRef(state);
@@ -132,9 +143,9 @@ function Round({
 
     if (next.phase === "done") {
       const outcome = outcomeOf(next);
-      const reward = recordRound(profileId, table, level.id, outcome);
+      const reward = recordRound(profileId, op, table, level.id, outcome);
       setFinished({ outcome, reward });
-      if (reward.allMastered) {
+      if (reward.subjectMastered) {
         sfx.master();
         fireworks(5000);
       } else if (outcome.passed) {
@@ -147,7 +158,7 @@ function Round({
   }
 
   // The clock only runs while a question is waiting for an answer.
-  const ticking = level.timeLimitMs !== undefined && state.phase === "answering";
+  const ticking = state.timeLimitMs !== undefined && state.phase === "answering";
   const onTick = useEffectEvent((ms: number) => dispatch({ type: "tick", ms }));
   useEffect(() => {
     if (!ticking) return;
@@ -201,6 +212,7 @@ function Round({
   if (finished) {
     return (
       <Results
+        op={op}
         table={table}
         level={level}
         finished={finished}
@@ -217,7 +229,7 @@ function Round({
     <Screen className="h-dvh max-w-xl gap-3 short:max-w-4xl short:gap-2">
       <header className="flex items-center gap-3">
         <Link
-          href={`/table/${table}/`}
+          href={`/play/${op}/${table}/`}
           className="btn btn-ghost btn-icon"
           aria-label="Stop playing"
         >
@@ -225,9 +237,9 @@ function Round({
         </Link>
         <ol
           className="flex min-w-0 flex-1 items-center justify-center gap-1"
-          aria-label={`${state.solved} of ${FACTS} answered`}
+          aria-label={`${state.solved} of ${state.facts} answered`}
         >
-          {Array.from({ length: FACTS }, (_, i) => (
+          {Array.from({ length: state.facts }, (_, i) => (
             <li key={i} className={`dot dot-${marks[i] ?? "todo"}`} />
           ))}
         </ol>
@@ -240,8 +252,8 @@ function Round({
         </span>
       </header>
 
-      {level.timeLimitMs !== undefined && (
-        <TimerBar msLeft={state.timeLeftMs} totalMs={level.timeLimitMs} />
+      {state.timeLimitMs !== undefined && (
+        <TimerBar msLeft={state.timeLeftMs} totalMs={state.timeLimitMs} />
       )}
 
       {state.phase === "ready" ? (
@@ -251,8 +263,8 @@ function Round({
           </p>
           <h1 className="text-4xl font-bold">Ready?</h1>
           <p className="max-w-xs text-xl text-white/85">
-            Answer all {FACTS} before the clock runs out. You’ve got{" "}
-            {Math.round((level.timeLimitMs ?? 0) / 1000)} seconds!
+            Answer all {state.facts} before the clock runs out. You’ve got{" "}
+            {Math.round((state.timeLimitMs ?? 0) / 1000)} seconds!
           </p>
           <button
             type="button"
@@ -371,9 +383,7 @@ function QuestionCard({
 }) {
   const { phase } = state;
   const typed = state.level.mode === "type";
-  const [left, right] = question.flipped
-    ? [question.b, state.table]
-    : [state.table, question.b];
+  const { symbol } = subject(state.op);
 
   let slot: ReactNode;
   if (phase === "right" || phase === "wrong") {
@@ -419,7 +429,8 @@ function QuestionCard({
         aria-live="polite"
         aria-atomic="true"
       >
-        {left} <span className="text-indigo-300">×</span> {right}{" "}
+        {question.left} <span className="text-indigo-300">{symbol}</span>{" "}
+        {question.right}{" "}
         <span className="text-indigo-300">=</span>{" "}
         {/* Fixed width, so the sum doesn't slide about as digits are typed. */}
         <span
@@ -443,17 +454,20 @@ function QuestionCard({
 }
 
 function Results({
+  op,
   table,
   level,
   finished,
   onReplay,
 }: {
+  op: Op;
   table: number;
   level: Level;
   finished: Finished;
   onReplay: () => void;
 }) {
   const { outcome, reward } = finished;
+  const info = subject(op);
   const nextLevel = LEVELS.find((l) => l.id === level.id + 1);
   const seconds =
     outcome.timeMs === null
@@ -463,29 +477,31 @@ function Results({
   let emoji: string;
   let title: string;
   let detail: string;
-  if (reward.allMastered) {
+  if (reward.subjectMastered) {
     emoji = "🏆";
     title = "You did it!";
-    detail = "That was the very last star. You are a Multiplication Master!";
+    detail = reward.allMastered
+      ? "That was the last star of all. You’ve mastered adding, subtracting and multiplying!"
+      : `That was the very last star. You are ${info.aMaster}!`;
   } else if (outcome.passed) {
     emoji = "🎉";
     title = !reward.newStar
       ? "Great job!"
       : reward.stars === STARS_PER_TABLE
-        ? `×${table} mastered!`
+        ? `${info.symbol}${table} mastered!`
         : "New star!";
     detail =
       seconds === null
-        ? `You got ${outcome.firstTry} out of ${FACTS} right!`
-        : `All ${FACTS} right in ${seconds} seconds!`;
+        ? `You got ${outcome.firstTry} out of ${outcome.facts} right!`
+        : `All ${outcome.facts} right in ${seconds} seconds!`;
   } else if (outcome.timedOut) {
     emoji = "⏰";
     title = "Time’s up!";
-    detail = `You got ${outcome.solved} of ${FACTS} before the clock ran out. Have another go!`;
+    detail = `You got ${outcome.solved} of ${outcome.facts} before the clock ran out. Have another go!`;
   } else {
     emoji = "💪";
-    title = outcome.firstTry >= level.goal - 2 ? "So close!" : "Good try!";
-    detail = `You got ${outcome.firstTry} out of ${FACTS} right. Get ${level.goal} to earn the star!`;
+    title = outcome.firstTry >= outcome.goal - 2 ? "So close!" : "Good try!";
+    detail = `You got ${outcome.firstTry} out of ${outcome.facts} right. Get ${outcome.goal} to earn the star!`;
   }
 
   return (
@@ -497,7 +513,7 @@ function Results({
       <div
         className="flex items-end justify-center gap-2"
         role="img"
-        aria-label={`${reward.stars} of ${STARS_PER_TABLE} stars on the ${table} times table`}
+        aria-label={`${reward.stars} of ${STARS_PER_TABLE} stars on the ${tableName(op, table)}`}
       >
         {Array.from({ length: STARS_PER_TABLE }, (_, i) => (
           <Star
@@ -521,21 +537,24 @@ function Results({
             {outcome.missed.length === 1 ? "Remember this one" : "Remember these"}
           </h2>
           <ul className="mt-2 flex flex-wrap justify-center gap-2">
-            {outcome.missed.map((b) => (
-              <li
-                key={b}
-                className="rounded-xl bg-white px-3 py-1.5 text-lg font-semibold tabular-nums text-ink"
-              >
-                {table} × {b} ={" "}
-                <span className="text-emerald-600">{table * b}</span>
-              </li>
-            ))}
+            {outcome.missed.map((b) => {
+              const { left, right, answer } = fact(op, table, b);
+              return (
+                <li
+                  key={b}
+                  className="rounded-xl bg-white px-3 py-1.5 text-lg font-semibold tabular-nums text-ink"
+                >
+                  {left} {info.symbol} {right} ={" "}
+                  <span className="text-emerald-600">{answer}</span>
+                </li>
+              );
+            })}
           </ul>
         </section>
       )}
 
       <div className="flex w-full max-w-sm flex-col gap-3">
-        {reward.allMastered ? (
+        {reward.subjectMastered ? (
           <Link href="/" className="btn btn-gold btn-lg animate-glow">
             See your trophy 🏆
           </Link>
@@ -549,7 +568,7 @@ function Results({
           </button>
         ) : nextLevel ? (
           <Link
-            href={`/table/${table}/${nextLevel.id}/`}
+            href={`/play/${op}/${table}/${nextLevel.id}/`}
             className="btn btn-gold btn-lg animate-glow"
             onClick={() => sfx.tap()}
           >
@@ -570,12 +589,12 @@ function Results({
             Play again
           </button>
         ) : (
-          <Link href={`/table/${table}/`} className="btn btn-ghost">
-            Peek at the {table} times table 👀
+          <Link href={`/play/${op}/${table}/`} className="btn btn-ghost">
+            Peek at the {tableName(op, table)} 👀
           </Link>
         )}
 
-        {(!outcome.passed || nextLevel) && !reward.allMastered && (
+        {(!outcome.passed || nextLevel) && !reward.subjectMastered && (
           <Link href="/" className="btn btn-ghost">
             All tables
           </Link>

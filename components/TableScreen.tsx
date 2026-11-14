@@ -3,18 +3,29 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
-import { FACTS, LEVELS, STARS_PER_TABLE, tableHue, type Level } from "@/lib/game";
+import {
+  LEVELS,
+  STARS_PER_TABLE,
+  fact,
+  rulesFor,
+  subject,
+  tableHue,
+  tableName,
+  type Level,
+  type Op,
+} from "@/lib/game";
 import { sfx } from "@/lib/sound";
 import {
   activeProfile,
   starsFor,
   useAppData,
+  useSubjectSync,
   type LevelBest,
 } from "@/lib/store";
 import { Screen, SoundToggle, Splash, Star, Stars, hue } from "./ui";
 
-/** One times table: its three levels, and the table itself to study. */
-export function TableScreen({ table }: { table: number }) {
+/** One table: its three levels, and the table itself to study. */
+export function TableScreen({ op, table }: { op: Op; table: number }) {
   const data = useAppData();
   const router = useRouter();
   const profile = data ? activeProfile(data) : null;
@@ -23,11 +34,13 @@ export function TableScreen({ table }: { table: number }) {
   useEffect(() => {
     if (nobodyPlaying) router.replace("/");
   }, [nobodyPlaying, router]);
+  useSubjectSync(profile, op);
 
   if (!profile) return <Splash />;
 
-  const stars = starsFor(profile, table);
-  const best = profile.tables[table]?.best ?? {};
+  const { symbol, facts } = subject(op);
+  const stars = starsFor(profile, op, table);
+  const best = profile.progress[op][table]?.best ?? {};
 
   return (
     <Screen>
@@ -45,13 +58,13 @@ export function TableScreen({ table }: { table: number }) {
           aria-hidden="true"
         >
           <span className="text-5xl font-bold leading-none sm:text-6xl">
-            <span className="text-[0.6em] opacity-60">×</span>
+            <span className="text-[0.6em] opacity-60">{symbol}</span>
             {table}
           </span>
         </div>
         <div className="min-w-0">
           <h1 className="text-3xl font-bold sm:text-4xl">
-            The {table} times table
+            The {tableName(op, table)}
           </h1>
           <p className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-lg text-white/85">
             <Stars count={stars} starClassName="size-8" />
@@ -68,6 +81,7 @@ export function TableScreen({ table }: { table: number }) {
         {LEVELS.map((level) => (
           <li key={level.id}>
             <LevelCard
+              op={op}
               table={table}
               level={level}
               stars={stars}
@@ -80,18 +94,20 @@ export function TableScreen({ table }: { table: number }) {
       {/* Open by default for a brand-new table, so there's something to learn from. */}
       <details className="card mt-6 p-4" open={stars === 0}>
         <summary className="cursor-pointer text-lg font-semibold">
-          👀 Peek at the {table} times table
+          👀 Peek at the {tableName(op, table)}
         </summary>
         <ul className="mt-3 grid grid-cols-2 gap-2 text-lg tabular-nums sm:grid-cols-3 md:grid-cols-4">
-          {Array.from({ length: FACTS }, (_, i) => i + 1).map((b) => (
-            <li
-              key={b}
-              className="rounded-xl bg-white/10 px-3 py-2 text-center font-medium"
-            >
-              {table} × {b} ={" "}
-              <strong className="text-amber-300">{table * b}</strong>
-            </li>
-          ))}
+          {Array.from({ length: facts }, (_, i) => fact(op, table, i + 1)).map(
+            ({ left, right, answer }) => (
+              <li
+                key={answer}
+                className="rounded-xl bg-white/10 px-3 py-2 text-center font-medium"
+              >
+                {left} {symbol} {right} ={" "}
+                <strong className="text-amber-300">{answer}</strong>
+              </li>
+            ),
+          )}
         </ul>
       </details>
     </Screen>
@@ -99,11 +115,13 @@ export function TableScreen({ table }: { table: number }) {
 }
 
 function LevelCard({
+  op,
   table,
   level,
   stars,
   best,
 }: {
+  op: Op;
   table: number;
   level: Level;
   stars: number;
@@ -112,12 +130,14 @@ function LevelCard({
   const earned = stars >= level.id;
   const locked = stars < level.id - 1;
   const upNext = stars === level.id - 1;
+  const rules = rulesFor(op, level);
 
   let bestText: string | null = null;
   if (earned && best?.timeMs != null) {
     bestText = `Best time: ${Math.max(1, Math.round(best.timeMs / 1000))} seconds`;
-  } else if (best && level.timeLimitMs === undefined) {
-    bestText = `Best so far: ${best.firstTry} out of ${FACTS}`;
+  } else if (best && !level.timed) {
+    // Capped: a best score can date from when this table had more facts.
+    bestText = `Best so far: ${Math.min(best.firstTry, rules.facts)} out of ${rules.facts}`;
   }
 
   const content = (
@@ -137,7 +157,7 @@ function LevelCard({
         </span>
         {!locked && (
           <span className="mt-0.5 block text-sm font-medium opacity-75">
-            🎯 {level.goalText}
+            🎯 {rules.goalText}
             {bestText && ` · ${bestText}`}
           </span>
         )}
@@ -157,7 +177,7 @@ function LevelCard({
 
   return (
     <Link
-      href={`/table/${table}/${level.id}/`}
+      href={`/play/${op}/${table}/${level.id}/`}
       className={`btn btn-hue w-full gap-4 p-4 ${upNext ? "animate-glow" : ""}`}
       style={hue(level.hue)}
       onClick={() => sfx.tap()}

@@ -111,15 +111,40 @@
 }
 
 @layer base {
+  /*
+   * Behave like an installed app, not a web page. This matters most on an
+   * iPad saved to the home screen and locked to the app for a child.
+   */
   html {
     background: #1b1748;
     color-scheme: dark;
+    /* One finger scrolls. Two fingers don't zoom, and neither does a double tap. */
+    touch-action: pan-x pan-y;
+    /* No rubber-band bounce or pull-to-refresh at the top and bottom. */
+    overscroll-behavior: none;
   }
 
   body {
     color: #fff;
     -webkit-tap-highlight-color: transparent;
-    overscroll-behavior-y: none;
+    overscroll-behavior: none;
+    /* A long press doesn't select text or pop up a link preview and share menu. */
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+  }
+
+  /* Typing a name still needs a cursor and selection. */
+  input,
+  textarea {
+    -webkit-user-select: text;
+    user-select: text;
+  }
+
+  /* On iPad a long press can otherwise lift a button off the page to drag it. */
+  a,
+  img {
+    -webkit-user-drag: none;
   }
 
   /* Night sky: a gradient with a few layers of tiny repeating stars. */
@@ -140,12 +165,6 @@
       310px 310px,
       350px 350px,
       100% 100%;
-  }
-
-  /* No double-tap zoom when a child taps quickly. */
-  a,
-  button {
-    touch-action: manipulation;
   }
 
   button {
@@ -287,7 +306,7 @@
     stroke: rgb(148 163 184 / 0.6);
   }
 
-  /* One times table on the home grid. */
+  /* One table on the home grid. */
   .tile {
     position: relative;
     display: flex;

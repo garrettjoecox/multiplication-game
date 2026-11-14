@@ -1,13 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import { TOTAL_STARS } from "@/lib/game";
 import { sfx } from "@/lib/sound";
 import {
   addProfile,
+  allStars,
   deleteProfile,
   selectProfile,
-  totalStars,
   type Profile,
 } from "@/lib/store";
 import { Screen, SoundToggle, Star } from "./ui";
@@ -103,7 +102,8 @@ export function ProfilePicker({ profiles }: { profiles: Profile[] }) {
                       </span>
                       <span className="pill text-sm">
                         <Star filled className="size-4" />
-                        {totalStars(profile)}/{TOTAL_STARS}
+                        {allStars(profile)}
+                        <span className="sr-only"> stars</span>
                       </span>
                     </button>
                     {managing && (

@@ -1,4 +1,11 @@
-import { FACTS, makeQuestion, makeQuestions, type Level, type Question } from "./game";
+import {
+  makeQuestion,
+  makeQuestions,
+  rulesFor,
+  type Level,
+  type Op,
+  type Question,
+} from "./game";
 
 export type Phase = "ready" | "answering" | "right" | "wrong" | "done";
 
@@ -10,14 +17,20 @@ export type Phase = "ready" | "answering" | "right" | "wrong" | "done";
 export type Mark = "todo" | "right" | "missed" | "fixed";
 
 export interface RoundState {
+  op: Op;
   table: number;
   level: Level;
+  /** Facts in this round, and how many must be right first try. */
+  facts: number;
+  goal: number;
+  /** Thinking time for the whole round. Untimed when missing. */
+  timeLimitMs?: number;
   phase: Phase;
   /** Questions still to answer. The first one is on screen. */
   queue: Question[];
-  /** Result per fact, indexed by (other factor − 1). */
+  /** Result per fact, indexed by (fact number − 1). */
   marks: Mark[];
-  /** Other factors in the order they were first attempted. */
+  /** Fact numbers in the order they were first attempted. */
   order: number[];
   /** Goes up with every new question; used to restart animations. */
   turn: number;
@@ -41,6 +54,9 @@ export type RoundAction =
 
 export interface Outcome {
   passed: boolean;
+  /** Facts in the round, and the right-first-try answers the star needed. */
+  facts: number;
+  goal: number;
   /** Facts answered correctly on the first try. */
   firstTry: number;
   /** Facts answered correctly at all. */
@@ -48,19 +64,24 @@ export interface Outcome {
   timedOut: boolean;
   /** Thinking time used, for timed levels. */
   timeMs: number | null;
-  /** Other factors that were answered wrong at least once. */
+  /** Fact numbers that were answered wrong at least once. */
   missed: number[];
   bestStreak: number;
 }
 
-export function newRound(table: number, level: Level): RoundState {
+export function newRound(op: Op, table: number, level: Level): RoundState {
+  const { facts, goal, timeLimitMs } = rulesFor(op, level);
   return {
+    op,
     table,
     level,
+    facts,
+    goal,
+    timeLimitMs,
     // Timed rounds wait for "Go!" so the clock never starts by surprise.
-    phase: level.timeLimitMs === undefined ? "answering" : "ready",
-    queue: makeQuestions(table, level),
-    marks: Array<Mark>(FACTS).fill("todo"),
+    phase: timeLimitMs === undefined ? "answering" : "ready",
+    queue: makeQuestions(op, table, level),
+    marks: Array<Mark>(facts).fill("todo"),
     order: [],
     turn: 0,
     solved: 0,
@@ -68,7 +89,7 @@ export function newRound(table: number, level: Level): RoundState {
     bestStreak: 0,
     input: "",
     picked: null,
-    timeLeftMs: level.timeLimitMs ?? 0,
+    timeLeftMs: timeLimitMs ?? 0,
     timedOut: false,
   };
 }
@@ -122,7 +143,7 @@ export function reduceRound(s: RoundState, a: RoundAction): RoundState {
       // A missed fact goes to the back of the line for another try.
       const queue =
         s.phase === "wrong"
-          ? [...rest, makeQuestion(s.table, current.b, s.level)]
+          ? [...rest, makeQuestion(s.op, s.table, current.b, s.level)]
           : rest;
       if (queue.length === 0) return { ...s, queue, phase: "done" };
       return {
@@ -136,7 +157,7 @@ export function reduceRound(s: RoundState, a: RoundAction): RoundState {
     }
 
     case "tick": {
-      if (s.phase !== "answering" || s.level.timeLimitMs === undefined) return s;
+      if (s.phase !== "answering" || s.timeLimitMs === undefined) return s;
       const timeLeftMs = Math.max(0, s.timeLeftMs - a.ms);
       return timeLeftMs > 0
         ? { ...s, timeLeftMs }
@@ -147,10 +168,12 @@ export function reduceRound(s: RoundState, a: RoundAction): RoundState {
 
 export function outcomeOf(s: RoundState): Outcome {
   const firstTry = s.marks.filter((m) => m === "right").length;
-  const limit = s.level.timeLimitMs;
+  const limit = s.timeLimitMs;
   return {
     // Timed rounds only end early when every fact has been answered correctly.
-    passed: limit === undefined ? firstTry >= s.level.goal : !s.timedOut,
+    passed: limit === undefined ? firstTry >= s.goal : !s.timedOut,
+    facts: s.facts,
+    goal: s.goal,
     firstTry,
     solved: s.solved,
     timedOut: s.timedOut,
